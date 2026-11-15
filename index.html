@@ -421,7 +421,7 @@
           <option value="BREAKFAST">Завтрак</option><option value="LUNCH">Обед</option><option value="DINNER">Ужин</option><option value="SNACK">Снек</option>
         </select>
         <div id="scanPreview"></div>
-        <button id="scanBtn" class="btn btn-primary btn-block">AI Food Scanner</button>
+        <button id="scanBtn" class="btn btn-primary btn-block" onclick="runScan()">AI Food Scanner</button>
         <div id="scanResult"></div>
       </div>
       <div class="card">
@@ -1588,7 +1588,7 @@ async function runScan() {
   const file = fileInput.files?.[0];
   if (!file) { haptic('error'); toast('Выберите фото блюда', true); return; }
 
-  const btn = document.getElementById('scanBtn');
+  const btn = document.getElementById('');
   btn.disabled = true;
   const orig = btn.textContent;
   btn.innerHTML = '<span class="spinner"></span> Анализ...';
@@ -1665,10 +1665,10 @@ async function runScan() {
         У: <b style="color:var(--orange)">${Math.round(totals.c)}г</b>
       </div>
       <div style="margin-bottom:10px">${itemsHTML}</div>
-      <button id="confirmScanBtn" class="btn btn-primary btn-block btn-sm">✓ Добавить в рацион</button>
+      <button id="confirm" class="btn btn-primary btn-block btn-sm">✓ Добавить в рацион</button>
     </div>`;
 
-  document.getElementById('confirmScanBtn').onclick = () => {
+  document.getElementById('confirm').onclick = () => {
     const mealType = document.getElementById('mealType').value;
     data.forEach(it => {
       const k = it.weight / 100;
@@ -1773,10 +1773,10 @@ function renderScanResultNew(scanData) {
         У: <b style="color:var(--orange)">${Math.round(totals.carbs)}г</b>
       </div>
       <div style="margin-bottom:10px">${itemsHTML}</div>
-      <button id="confirmScanBtn" class="btn btn-primary btn-block btn-sm">✓ Добавить в рацион</button>
+      <button id="confirm" class="btn btn-primary btn-block btn-sm">✓ Добавить в рацион</button>
     </div>`;
 
-  document.getElementById('confirmScanBtn').onclick = () => {
+  document.getElementById('confirm').onclick = () => {
     const mealType = document.getElementById('mealType').value;
     const toAdd = data;
     
@@ -1851,7 +1851,7 @@ document.getElementById('editTargetsBtn').onclick=showEditTargets;
 document.getElementById('addProductBtn').onclick=showAddProduct;
 document.getElementById('addMealBtn').onclick=showManualAddMeal;
 document.getElementById('customWaterBtn').onclick=()=>{const v=prompt('Сколько мл?','300');if(v&&!isNaN(+v)){setWaterForDate(state.selectedDate,getWaterForDate(state.selectedDate)+ +v);save();renderNutrition();toast('+'+v+' мл');}};
-document.getElementById('scanBtn').onclick=runScan;
+document.getElementById('').onclick=runScan;
 document.getElementById('smartFillBtn').onclick=showSmartFill;
 document.getElementById('editProfileBtn').onclick=showEditProfile;
 document.getElementById('anketaCard').onclick=showAnketaSummary;
