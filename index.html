@@ -1286,7 +1286,71 @@ const chatInputEl=document.getElementById('chatInput');
 let chatOpen=false;
 function toggleChat(){if(chatOpen)closeChat();else openChat();}
 function openChat(){chatOpen=true;chatPopupEl.classList.add('show');if(!state.aiChat.length){const screen=document.querySelector('.screen.active')?.id?.replace('screen-','')||'PLAN';state.aiChat.push({role:'ai',text:getGreeting(screen)});}renderChat();setTimeout(()=>chatInputEl.focus(),250);haptic('light');}
-function closeChat(){chatOpen=false;chatPopupEl.classList.remove('show');}
+async function sendChat(){
+  const text=(chatInputEl.value||'').trim();
+  if(!text)return;
+  state.aiChat.push({role:'user',text});
+  chatInputEl.value='';
+  renderChat();
+  haptic('light');
+
+  const typingEl=document.createElement('div');
+  typingEl.className='msg ai';
+  typingEl.id='typingIndicator';
+  typingEl.innerHTML='<span class="spinner"></span> Думаю...';
+  chatMessagesEl.appendChild(typingEl);
+  chatMessagesEl.scrollTop=chatMessagesEl.scrollHeight;
+
+  try {
+    const wo=getWorkoutForDate(state.selectedDate);
+    const resp=await fetch(WORKER_URL+'/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        message:text,
+        context:{
+          goal:state.profile.primaryGoal,
+          weight:state.body.weight,
+          restrictions:inferRestrictions(),
+          sleep:state.body.sleep,
+          readiness:calcReadiness(),
+          volume:volumeByDate(state.selectedDate),
+          workoutTitle:wo.title||'Отдых'
+        }
+      })
+    });
+    const data=await resp.json();
+    if(!resp.ok)throw new Error(data.error||'AI error');
+    state.aiChat.push({role:'ai',text:data.reply||'Не могу ответить'});
+    haptic('success');
+  } catch(e){
+    console.error('Chat error:',e);
+    state.aiChat.push({role:'ai',text:generateFallbackReply(text)});
+    toast('AI недоступен, использую эвристики',true);
+  } finally {
+    const t=document.getElementById('typingIndicator');
+    if(t)t.remove();
+  }
+  save();
+  renderChat();
+}
+
+function generateFallbackReply(text){
+  const t=text.toLowerCase();
+  if(/объ[её]м|тоннаж/.test(t)){
+    const vol=volumeByDate(state.selectedDate);
+    return `Сегодня тоннаж **${fmt(vol)} кг**. ${vol>4000?'Не добавляй подходы.':'Можно +1 подход.'}`;
+  }
+  if(/бел|калор|еда/.test(t)){
+    const m=sumMacros(state.nutrition.filter(n=>n.date===state.selectedDate));
+    const need=Math.max(0,state.targets.protein-m.protein);
+    return `Белка ${r0(m.protein)} из ${state.targets.protein} г. ${need>30?`Добери ${r0(need)} г.`:'Хватает.'}`;
+  }
+  if(/сон|восстанов/.test(t)){
+    return `Сон ${state.body.sleep} ч. Readiness ${calcReadiness()}%.`;
+  }
+  return 'AI временно недоступен. Спроси про объём, питание или сон.';
+}
 function getGreeting(screen){
   const inj=inferRestrictions();
   const ctx=screen==='PLAN'?'вижу тренировку':screen==='NUTRITION'?'вижу дневник питания':'';
