@@ -1630,7 +1630,7 @@ async function runScan() {
       };
     });
 
-    renderScanResult();
+    renderScanResultNew(pendingScan);
     haptic('success');
     toast('Распознано ' + pendingScan.length + ' компонентов');
   } catch (err) {
@@ -1674,14 +1674,75 @@ function fileToBase64(file) {
     reader.readAsDataURL(file);
   });
 }
-function addScanToNutrition(){
-  if(!pendingScan)return;
-  const mealType=document.getElementById('mealType').value;let added=0;
-  pendingScan.forEach(it=>{if(!it.weight||it.weight<=0)return;const m=scaleItem(it);state.nutrition.push({id:uid(),date:state.selectedDate,mealType,name:it.name,weight:it.weight,calories:m.calories,protein:m.protein,fat:m.fat,carbs:m.carbs,confidence:it.conf});added++;});
-  if(!added){toast('Укажите вес',true);return;}
-  save();pendingScan=null;document.getElementById('scanPreview').innerHTML='';document.getElementById('foodPhoto').value='';
-  if(previewUrl){URL.revokeObjectURL(previewUrl);previewUrl=null;}
-  renderNutrition();haptic('success');toast('Добавлено');
+
+function renderScanResultNew(scanData) {
+  const data = scanData || pendingScan;
+  const el = document.getElementById('scanResult');
+  if (!el) { console.error('scanResult element not found'); return; }
+  if (!data || !data.length) { el.innerHTML = ''; return; }
+
+  const totals = data.reduce((a, it) => {
+    const k = it.weight / 100;
+    a.calories += (it.per100.cal || 0) * k;
+    a.protein += (it.per100.p || 0) * k;
+    a.fat += (it.per100.f || 0) * k;
+    a.carbs += (it.per100.c || 0) * k;
+    return a;
+  }, {calories: 0, protein: 0, fat: 0, carbs: 0});
+
+  const itemsHTML = data.map(it => {
+    const cal = Math.round((it.per100.cal || 0) * it.weight / 100);
+    return `<div class="row between small" style="padding:6px 0;border-bottom:1px solid var(--border)">
+      <span>${esc(it.name)} <span class="muted">(${Math.round(it.weight)}г)</span></span>
+      <span class="mono muted">${cal} ккал</span>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="card" style="margin-top:12px;border-color:var(--volt);background:rgba(204,255,0,0.03)">
+      <div class="row between">
+        <div class="h3">${data.length} ингредиентов</div>
+        <span class="pill accent mono">${Math.round(totals.calories)} ккал</span>
+      </div>
+      <div class="muted small mono" style="margin:8px 0;padding:6px 8px;background:#0A0A0A;border-radius:8px">
+        Б: <b style="color:var(--volt)">${Math.round(totals.protein)}г</b> ·
+        Ж: <b style="color:var(--blue)">${Math.round(totals.fat)}г</b> ·
+        У: <b style="color:var(--orange)">${Math.round(totals.carbs)}г</b>
+      </div>
+      <div style="margin-bottom:10px">${itemsHTML}</div>
+      <button id="confirmScanBtn" class="btn btn-primary btn-block btn-sm">✓ Добавить в рацион</button>
+    </div>`;
+
+  document.getElementById('confirmScanBtn').onclick = () => {
+    const mealType = document.getElementById('mealType').value;
+    const toAdd = data;
+    
+    toAdd.forEach(it => {
+      const k = it.weight / 100;
+      state.nutrition.push({
+        id: uid(),
+        date: todayStr(),
+        mealType: mealType,
+        name: it.name,
+        weight: it.weight,
+        calories: (it.per100.cal || 0) * k,
+        protein: (it.per100.p || 0) * k,
+        fat: (it.per100.f || 0) * k,
+        carbs: (it.per100.c || 0) * k,
+        confidence: it.conf
+      });
+    });
+    
+    save();
+    renderNutrition();
+    renderCalendar();
+    pendingScan = null;
+    el.innerHTML = '';
+    document.getElementById('scanPreview').innerHTML = '';
+    document.getElementById('foodPhoto').value = '';
+    toast('Добавлено в рацион: ' + toAdd.length + ' ингредиентов');
+    haptic('success');
+  };
 }
 
 function exportJson(){const b=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});dl(b,'monolith-state.json');haptic('success');toast('JSON экспортирован');}
