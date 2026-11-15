@@ -1,4 +1,106 @@
-<!DOCTYPE html>
+async function runScan() {
+  const fileInput = document.getElementById('foodPhoto');
+  const file = fileInput.files?.[0];
+  if (!file) { haptic('error'); toast('Выберите фото блюда', true); return; }
+
+  const btn = document.getElementById('scanBtn');
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.innerHTML = '<span class="spinner"></span> Анализ...';
+  haptic('light');
+
+  try {
+    const dataUrl = await compressImage(file, 512);
+    const base64 = dataUrl.split(',')[1];
+
+    const resp = await fetch(WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: base64, mimeType: 'image/jpeg' })
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      throw new Error(data.details || data.message || data.error || `HTTP ${resp.status}`);
+    }
+
+    if (!data.items || !Array.isArray(data.items) || data.items.length === 0) {
+      haptic('error'); toast('Не удалось распознать еду', true);
+      return;
+    }
+
+    pendingScan = data.items.map(it => {
+      const w = Math.max(1, it.weight_g || 100);
+      return {
+        name: it.name || 'Ингредиент',
+        weight: w,
+        per100: {
+          cal: (it.calories || 0) / w * 100,
+          p: (it.protein || 0) / w * 100,
+          f: (it.fat || 0) / w * 100,
+          c: (it.carbs || 0) / w * 100
+        },
+        conf: it.confidence || 0.85
+      };
+    });
+
+    // ГАРАНТИРОВАННЫЙ РЕНДЕР
+    try {
+      renderScanResultNew(pendingScan);
+    } catch (renderErr) {
+      console.error('Render error:', renderErr);
+      // Fallback: прямой рендер без функции
+      const el = document.getElementById('scanResult');
+      if (el) {
+        const totals = pendingScan.reduce((a, it) => {
+          const k = it.weight / 100;
+          a.cal += (it.per100.cal || 0) * k;
+          a.p += (it.per100.p || 0) * k;
+          a.f += (it.per100.f || 0) * k;
+          a.c += (it.per100.c || 0) * k;
+          return a;
+        }, {cal: 0, p: 0, f: 0, c: 0});
+        el.innerHTML = `
+          <div style="background:var(--surface);border:1px solid var(--volt);border-radius:12px;padding:12px;margin-top:10px">
+            <div style="color:var(--volt);font-weight:700;margin-bottom:8px">${pendingScan.length} ингредиентов · ${Math.round(totals.cal)} ккал</div>
+            ${pendingScan.map(it => `<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">${it.name} — ${Math.round(it.weight)}г — ${Math.round(it.per100.cal * it.weight / 100)} ккал</div>`).join('')}
+            <button id="confirmScanFallback" style="background:var(--volt);color:#000;border:none;border-radius:8px;padding:8px;margin-top:10px;width:100%;font-weight:700">✓ Добавить в рацион</button>
+          </div>`;
+        document.getElementById('confirmScanFallback').onclick = () => {
+          const mealType = document.getElementById('mealType').value;
+          pendingScan.forEach(it => {
+            const k = it.weight / 100;
+            state.nutrition.push({
+              id: uid(), date: todayStr(), mealType,
+              name: it.name, weight: it.weight,
+              calories: (it.per100.cal || 0) * k,
+              protein: (it.per100.p || 0) * k,
+              fat: (it.per100.f || 0) * k,
+              carbs: (it.per100.c || 0) * k,
+              confidence: it.conf
+            });
+          });
+          save(); renderNutrition(); renderCalendar();
+          pendingScan = null; el.innerHTML = '';
+          document.getElementById('scanPreview').innerHTML = '';
+          document.getElementById('foodPhoto').value = '';
+          toast('Добавлено в рацион');
+          haptic('success');
+        };
+      }
+    }
+
+    haptic('success');
+    toast('Распознано ' + pendingScan.length + ' компонентов');
+  } catch (err) {
+    console.error('Scan error:', err);
+    haptic('error');
+    toast('Ошибка: ' + (err.message || 'неизвестно'), true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8" />
@@ -1585,7 +1687,6 @@ async function runScan() {
   const fileInput = document.getElementById('foodPhoto');
   const file = fileInput.files?.[0];
   if (!file) { haptic('error'); toast('Выберите фото блюда', true); return; }
-  if (file.size > 8 * 1024 * 1024) { haptic('error'); toast('Фото больше 8 МБ', true); return; }
 
   const btn = document.getElementById('scanBtn');
   btn.disabled = true;
@@ -1594,7 +1695,6 @@ async function runScan() {
   haptic('light');
 
   try {
-    // Сжатие до 512px — критично для Gemini Vision
     const dataUrl = await compressImage(file, 512);
     const base64 = dataUrl.split(',')[1];
 
@@ -1606,19 +1706,18 @@ async function runScan() {
 
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      const detail = data.details || data.message || data.error || `HTTP ${resp.status}`;
-      throw new Error(String(detail).slice(0, 150));
+      throw new Error(data.details || data.message || data.error || `HTTP ${resp.status}`);
     }
 
-    if (!data.items || data.items.length === 0) {
-      haptic('error'); toast('На фото не удалось распознать еду', true);
+    if (!data.items || !Array.isArray(data.items) || data.items.length === 0) {
+      haptic('error'); toast('Не удалось распознать еду', true);
       return;
     }
 
     pendingScan = data.items.map(it => {
       const w = Math.max(1, it.weight_g || 100);
       return {
-        name: it.name,
+        name: it.name || 'Ингредиент',
         weight: w,
         per100: {
           cal: (it.calories || 0) / w * 100,
@@ -1630,13 +1729,58 @@ async function runScan() {
       };
     });
 
-    renderScanResultNew(pendingScan);
+    // ГАРАНТИРОВАННЫЙ РЕНДЕР
+    try {
+      renderScanResultNew(pendingScan);
+    } catch (renderErr) {
+      console.error('Render error:', renderErr);
+      // Fallback: прямой рендер без функции
+      const el = document.getElementById('scanResult');
+      if (el) {
+        const totals = pendingScan.reduce((a, it) => {
+          const k = it.weight / 100;
+          a.cal += (it.per100.cal || 0) * k;
+          a.p += (it.per100.p || 0) * k;
+          a.f += (it.per100.f || 0) * k;
+          a.c += (it.per100.c || 0) * k;
+          return a;
+        }, {cal: 0, p: 0, f: 0, c: 0});
+        el.innerHTML = `
+          <div style="background:var(--surface);border:1px solid var(--volt);border-radius:12px;padding:12px;margin-top:10px">
+            <div style="color:var(--volt);font-weight:700;margin-bottom:8px">${pendingScan.length} ингредиентов · ${Math.round(totals.cal)} ккал</div>
+            ${pendingScan.map(it => `<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">${it.name} — ${Math.round(it.weight)}г — ${Math.round(it.per100.cal * it.weight / 100)} ккал</div>`).join('')}
+            <button id="confirmScanFallback" style="background:var(--volt);color:#000;border:none;border-radius:8px;padding:8px;margin-top:10px;width:100%;font-weight:700">✓ Добавить в рацион</button>
+          </div>`;
+        document.getElementById('confirmScanFallback').onclick = () => {
+          const mealType = document.getElementById('mealType').value;
+          pendingScan.forEach(it => {
+            const k = it.weight / 100;
+            state.nutrition.push({
+              id: uid(), date: todayStr(), mealType,
+              name: it.name, weight: it.weight,
+              calories: (it.per100.cal || 0) * k,
+              protein: (it.per100.p || 0) * k,
+              fat: (it.per100.f || 0) * k,
+              carbs: (it.per100.c || 0) * k,
+              confidence: it.conf
+            });
+          });
+          save(); renderNutrition(); renderCalendar();
+          pendingScan = null; el.innerHTML = '';
+          document.getElementById('scanPreview').innerHTML = '';
+          document.getElementById('foodPhoto').value = '';
+          toast('Добавлено в рацион');
+          haptic('success');
+        };
+      }
+    }
+
     haptic('success');
     toast('Распознано ' + pendingScan.length + ' компонентов');
   } catch (err) {
     console.error('Scan error:', err);
     haptic('error');
-    toast('Ошибка: ' + (err.message || 'не удалось распознать'), true);
+    toast('Ошибка: ' + (err.message || 'неизвестно'), true);
   } finally {
     btn.disabled = false;
     btn.textContent = orig;
