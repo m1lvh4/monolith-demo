@@ -570,6 +570,8 @@
 (() => {
 'use strict';
 const KEY='monolith_demo_v8';
+const WORKER_URL = 'https://monolith-vision.alekseevt229.workers.dev';
+let pendingScan = null;
 const tg=window.Telegram?.WebApp;
 try{tg?.ready();tg?.expand();tg?.setHeaderColor?.('#0A0A0A');tg?.setBackgroundColor?.('#0A0A0A');}catch(e){}
 
@@ -1629,49 +1631,68 @@ async function runScan() {
 
     // ГАРАНТИРОВАННЫЙ РЕНДЕР
     try {
-      renderScanResultNew(pendingScan);
-    } catch (renderErr) {
-      console.error('Render error:', renderErr);
-      // Fallback: прямой рендер без функции
-      const el = document.getElementById('scanResult');
-      if (el) {
-        const totals = pendingScan.reduce((a, it) => {
-          const k = it.weight / 100;
-          a.cal += (it.per100.cal || 0) * k;
-          a.p += (it.per100.p || 0) * k;
-          a.f += (it.per100.f || 0) * k;
-          a.c += (it.per100.c || 0) * k;
-          return a;
-        }, {cal: 0, p: 0, f: 0, c: 0});
-        el.innerHTML = `
-          <div style="background:var(--surface);border:1px solid var(--volt);border-radius:12px;padding:12px;margin-top:10px">
-            <div style="color:var(--volt);font-weight:700;margin-bottom:8px">${pendingScan.length} ингредиентов · ${Math.round(totals.cal)} ккал</div>
-            ${pendingScan.map(it => `<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">${it.name} — ${Math.round(it.weight)}г — ${Math.round(it.per100.cal * it.weight / 100)} ккал</div>`).join('')}
-            <button id="confirmScanFallback" style="background:var(--volt);color:#000;border:none;border-radius:8px;padding:8px;margin-top:10px;width:100%;font-weight:700">✓ Добавить в рацион</button>
-          </div>`;
-        document.getElementById('confirmScanFallback').onclick = () => {
-          const mealType = document.getElementById('mealType').value;
-          pendingScan.forEach(it => {
-            const k = it.weight / 100;
-            state.nutrition.push({
-              id: uid(), date: todayStr(), mealType,
-              name: it.name, weight: it.weight,
-              calories: (it.per100.cal || 0) * k,
-              protein: (it.per100.p || 0) * k,
-              fat: (it.per100.f || 0) * k,
-              carbs: (it.per100.c || 0) * k,
-              confidence: it.conf
-            });
-          });
-          save(); renderNutrition(); renderCalendar();
-          pendingScan = null; el.innerHTML = '';
-          document.getElementById('scanPreview').innerHTML = '';
-          document.getElementById('foodPhoto').value = '';
-          toast('Добавлено в рацион');
-          haptic('success');
-        };
-      }
-    }
+      function renderScanResultNew(data) {
+  const el = document.getElementById('scanResult');
+  if (!el) { console.error('scanResult element not found'); return; }
+  if (!data || !data.length) { el.innerHTML = ''; return; }
+
+  const totals = data.reduce((a, it) => {
+    const k = it.weight / 100;
+    a.cal += (it.per100.cal || 0) * k;
+    a.p += (it.per100.p || 0) * k;
+    a.f += (it.per100.f || 0) * k;
+    a.c += (it.per100.c || 0) * k;
+    return a;
+  }, {cal: 0, p: 0, f: 0, c: 0});
+
+  const itemsHTML = data.map(it => {
+    const cal = Math.round((it.per100.cal || 0) * it.weight / 100);
+    return `<div class="row between small" style="padding:6px 0;border-bottom:1px solid var(--border)">
+      <span>${esc(it.name)} <span class="muted">(${Math.round(it.weight)}г)</span></span>
+      <span class="mono muted">${cal} ккал</span>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="card" style="margin-top:12px;border-color:var(--volt);background:rgba(204,255,0,0.03)">
+      <div class="row between">
+        <div class="h3">${data.length} ингредиентов</div>
+        <span class="pill accent mono">${Math.round(totals.cal)} ккал</span>
+      </div>
+      <div class="muted small mono" style="margin:8px 0;padding:6px 8px;background:#0A0A0A;border-radius:8px">
+        Б: <b style="color:var(--volt)">${Math.round(totals.p)}г</b> ·
+        Ж: <b style="color:var(--blue)">${Math.round(totals.f)}г</b> ·
+        У: <b style="color:var(--orange)">${Math.round(totals.c)}г</b>
+      </div>
+      <div style="margin-bottom:10px">${itemsHTML}</div>
+      <button id="confirmScanBtn" class="btn btn-primary btn-block btn-sm">✓ Добавить в рацион</button>
+    </div>`;
+
+  document.getElementById('confirmScanBtn').onclick = () => {
+    const mealType = document.getElementById('mealType').value;
+    data.forEach(it => {
+      const k = it.weight / 100;
+      state.nutrition.push({
+        id: uid(), date: state.selectedDate, mealType,
+        name: it.name, weight: it.weight,
+        calories: (it.per100.cal || 0) * k,
+        protein: (it.per100.p || 0) * k,
+        fat: (it.per100.f || 0) * k,
+        carbs: (it.per100.c || 0) * k,
+        confidence: it.conf
+      });
+    });
+    save();
+    renderNutrition();
+    renderCalendar();
+    pendingScan = null;
+    el.innerHTML = '';
+    document.getElementById('scanPreview').innerHTML = '';
+    document.getElementById('foodPhoto').value = '';
+    toast('Добавлено в рацион');
+    haptic('success');
+  };
+}
 
     haptic('success');
     toast('Распознано ' + pendingScan.length + ' компонентов');
