@@ -421,7 +421,7 @@
           <option value="BREAKFAST">Завтрак</option><option value="LUNCH">Обед</option><option value="DINNER">Ужин</option><option value="SNACK">Снек</option>
         </select>
         <div id="scanPreview"></div>
-        <button id="scanBtn" class="btn btn-primary btn-block" onclick="runScan()">AI Food Scanner</button>
+        <button id="scanBtn" class="btn btn-primary btn-block">AI Food Scanner</button>
         <div id="scanResult"></div>
       </div>
       <div class="card">
@@ -570,8 +570,6 @@
 (() => {
 'use strict';
 const KEY='monolith_demo_v8';
-const WORKER_URL = 'https://monolith-vision.alekseevt229.workers.dev';
-let pendingScan = null;
 const tg=window.Telegram?.WebApp;
 try{tg?.ready();tg?.expand();tg?.setHeaderColor?.('#0A0A0A');tg?.setBackgroundColor?.('#0A0A0A');}catch(e){}
 
@@ -1587,14 +1585,16 @@ async function runScan() {
   const fileInput = document.getElementById('foodPhoto');
   const file = fileInput.files?.[0];
   if (!file) { haptic('error'); toast('Выберите фото блюда', true); return; }
+  if (file.size > 8 * 1024 * 1024) { haptic('error'); toast('Фото больше 8 МБ', true); return; }
 
-  const btn = document.getElementById('');
+  const btn = document.getElementById('scanBtn');
   btn.disabled = true;
   const orig = btn.textContent;
   btn.innerHTML = '<span class="spinner"></span> Анализ...';
   haptic('light');
 
   try {
+    // Сжатие до 512px — критично для Gemini Vision
     const dataUrl = await compressImage(file, 512);
     const base64 = dataUrl.split(',')[1];
 
@@ -1606,18 +1606,19 @@ async function runScan() {
 
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      throw new Error(data.details || data.message || data.error || `HTTP ${resp.status}`);
+      const detail = data.details || data.message || data.error || `HTTP ${resp.status}`;
+      throw new Error(String(detail).slice(0, 150));
     }
 
-    if (!data.items || !Array.isArray(data.items) || data.items.length === 0) {
-      haptic('error'); toast('Не удалось распознать еду', true);
+    if (!data.items || data.items.length === 0) {
+      haptic('error'); toast('На фото не удалось распознать еду', true);
       return;
     }
 
     pendingScan = data.items.map(it => {
       const w = Math.max(1, it.weight_g || 100);
       return {
-        name: it.name || 'Ингредиент',
+        name: it.name,
         weight: w,
         per100: {
           cal: (it.calories || 0) / w * 100,
@@ -1629,77 +1630,13 @@ async function runScan() {
       };
     });
 
-    // ГАРАНТИРОВАННЫЙ РЕНДЕР
-    try {
-      function renderScanResultNew(data) {
-  const el = document.getElementById('scanResult');
-  if (!el) { console.error('scanResult element not found'); return; }
-  if (!data || !data.length) { el.innerHTML = ''; return; }
-
-  const totals = data.reduce((a, it) => {
-    const k = it.weight / 100;
-    a.cal += (it.per100.cal || 0) * k;
-    a.p += (it.per100.p || 0) * k;
-    a.f += (it.per100.f || 0) * k;
-    a.c += (it.per100.c || 0) * k;
-    return a;
-  }, {cal: 0, p: 0, f: 0, c: 0});
-
-  const itemsHTML = data.map(it => {
-    const cal = Math.round((it.per100.cal || 0) * it.weight / 100);
-    return `<div class="row between small" style="padding:6px 0;border-bottom:1px solid var(--border)">
-      <span>${esc(it.name)} <span class="muted">(${Math.round(it.weight)}г)</span></span>
-      <span class="mono muted">${cal} ккал</span>
-    </div>`;
-  }).join('');
-
-  el.innerHTML = `
-    <div class="card" style="margin-top:12px;border-color:var(--volt);background:rgba(204,255,0,0.03)">
-      <div class="row between">
-        <div class="h3">${data.length} ингредиентов</div>
-        <span class="pill accent mono">${Math.round(totals.cal)} ккал</span>
-      </div>
-      <div class="muted small mono" style="margin:8px 0;padding:6px 8px;background:#0A0A0A;border-radius:8px">
-        Б: <b style="color:var(--volt)">${Math.round(totals.p)}г</b> ·
-        Ж: <b style="color:var(--blue)">${Math.round(totals.f)}г</b> ·
-        У: <b style="color:var(--orange)">${Math.round(totals.c)}г</b>
-      </div>
-      <div style="margin-bottom:10px">${itemsHTML}</div>
-      <button id="confirm" class="btn btn-primary btn-block btn-sm">✓ Добавить в рацион</button>
-    </div>`;
-
-  document.getElementById('confirm').onclick = () => {
-    const mealType = document.getElementById('mealType').value;
-    data.forEach(it => {
-      const k = it.weight / 100;
-      state.nutrition.push({
-        id: uid(), date: state.selectedDate, mealType,
-        name: it.name, weight: it.weight,
-        calories: (it.per100.cal || 0) * k,
-        protein: (it.per100.p || 0) * k,
-        fat: (it.per100.f || 0) * k,
-        carbs: (it.per100.c || 0) * k,
-        confidence: it.conf
-      });
-    });
-    save();
-    renderNutrition();
-    renderCalendar();
-    pendingScan = null;
-    el.innerHTML = '';
-    document.getElementById('scanPreview').innerHTML = '';
-    document.getElementById('foodPhoto').value = '';
-    toast('Добавлено в рацион');
-    haptic('success');
-  };
-}
-
+    renderScanResultNew(pendingScan);
     haptic('success');
     toast('Распознано ' + pendingScan.length + ' компонентов');
   } catch (err) {
     console.error('Scan error:', err);
     haptic('error');
-    toast('Ошибка: ' + (err.message || 'неизвестно'), true);
+    toast('Ошибка: ' + (err.message || 'не удалось распознать'), true);
   } finally {
     btn.disabled = false;
     btn.textContent = orig;
@@ -1773,10 +1710,10 @@ function renderScanResultNew(scanData) {
         У: <b style="color:var(--orange)">${Math.round(totals.carbs)}г</b>
       </div>
       <div style="margin-bottom:10px">${itemsHTML}</div>
-      <button id="confirm" class="btn btn-primary btn-block btn-sm">✓ Добавить в рацион</button>
+      <button id="confirmScanBtn" class="btn btn-primary btn-block btn-sm">✓ Добавить в рацион</button>
     </div>`;
 
-  document.getElementById('confirm').onclick = () => {
+  document.getElementById('confirmScanBtn').onclick = () => {
     const mealType = document.getElementById('mealType').value;
     const toAdd = data;
     
@@ -1851,7 +1788,7 @@ document.getElementById('editTargetsBtn').onclick=showEditTargets;
 document.getElementById('addProductBtn').onclick=showAddProduct;
 document.getElementById('addMealBtn').onclick=showManualAddMeal;
 document.getElementById('customWaterBtn').onclick=()=>{const v=prompt('Сколько мл?','300');if(v&&!isNaN(+v)){setWaterForDate(state.selectedDate,getWaterForDate(state.selectedDate)+ +v);save();renderNutrition();toast('+'+v+' мл');}};
-document.getElementById('').onclick=runScan;
+document.getElementById('scanBtn').onclick=runScan;
 document.getElementById('smartFillBtn').onclick=showSmartFill;
 document.getElementById('editProfileBtn').onclick=showEditProfile;
 document.getElementById('anketaCard').onclick=showAnketaSummary;
